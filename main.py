@@ -2,12 +2,13 @@ import asyncio
 import aiohttp
 import aiofiles
 import random
+import json
 from bs4 import BeautifulSoup
 
 async def scrape_episode_summary(session, url, episode_num):
     """异步爬取单个剧集的剧情摘要"""
     try:
-        # 随机延迟 1-3 秒
+        # 随机延迟
         await asyncio.sleep(random.uniform(0.2, 0.5))
         async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
             response.raise_for_status()
@@ -35,10 +36,12 @@ async def scrape_episode_summary(session, url, episode_num):
         return episode_num, f"第{episode_num}集", f"错误: {str(e)}"
 
 async def main():
-    # 生成URL列表
-    # https://www.tvmao.com/drama/Li4kNGg=/episode/13-41 海棠依旧的第41集url
-    base_url = "https://www.tvmao.com/drama/Li4kNGg=/episode/"
-    total_episodes = 41  # 假设总集数为100，可以修改
+    # 从配置文件读取设置
+    with open('config.json', 'r', encoding='utf-8') as f:
+        config = json.load(f)
+    base_url = config['base_url']
+    total_episodes = config['total_episodes']
+    
     episode_urls = []
     for i in range(1, total_episodes + 1):
         prefix = (i - 1) // 3
