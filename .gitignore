@@ -11,3 +11,6 @@ wheels/
 
 # Text files
 *.txt
+
+# Vscode settings
+.vscode/
