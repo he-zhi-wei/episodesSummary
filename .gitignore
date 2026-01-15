@@ -14,3 +14,9 @@ wheels/
 
 # Vscode settings
 .vscode/
+
+# ipynb files
+*.ipynb
+
+# html files
+*.html

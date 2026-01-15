@@ -2,8 +2,22 @@ import asyncio
 import aiohttp
 import aiofiles
 import random
-import json
 from bs4 import BeautifulSoup
+from find_href import data_process
+
+
+def url_process(base_url, episodes_num):
+    """根据基础URL和剧集总数生成每一集的URL列表"""  
+    episode_urls = []
+    for i in range(1, episodes_num + 1):
+        prefix = (i - 1) // 3
+        url = f"{base_url}/episode/{prefix}-{i}"
+        episode_urls.append(url)
+
+    #第1集url特别处理
+    episode_urls[0] = episode_urls[0].replace(f"/0-1", "/")
+
+    return episode_urls
 
 async def scrape_episode_summary(session, url, episode_num):
     """异步爬取单个剧集的剧情摘要"""
@@ -36,21 +50,16 @@ async def scrape_episode_summary(session, url, episode_num):
         return episode_num, f"第{episode_num}集", f"错误: {str(e)}"
 
 async def main():
-    # 从配置文件读取设置
-    with open('config.json', 'r', encoding='utf-8') as f:
-        config = json.load(f)
-    base_url = config['base_url']
-    total_episodes = config['total_episodes']
-    
-    episode_urls = []
-    for i in range(1, total_episodes + 1):
-        prefix = (i - 1) // 3
-        url = f"{base_url}{prefix}-{i}"
-        episode_urls.append(url)
+    print("--- 剧集链接获取 ---")
+    data = data_process()
+    title = data['title']
+    base_url = data['base_url']
+    episodes_num = data['episodes_num'] 
 
-    #第1集url特别处理
-    episode_urls[0] = base_url[:-1]
+    print(f"开始爬取《{title}》的剧情摘要，共{episodes_num}集")
 
+
+    episode_urls = url_process(base_url, episodes_num)
 
 
     async with aiohttp.ClientSession(headers={
@@ -59,7 +68,7 @@ async def main():
         tasks = [scrape_episode_summary(session, url, i+1) for i, url in enumerate(episode_urls)]
         
         results = {}
-        async with aiofiles.open('episodes_summary.txt', 'w', encoding='utf-8') as file:
+        async with aiofiles.open(f'{title}_episodes_summary.txt', 'w', encoding='utf-8') as file:
             current_episode = 1
             for coro in asyncio.as_completed(tasks):
                 episode_num, title, content = await coro
@@ -72,7 +81,7 @@ async def main():
                     del results[current_episode]
                     current_episode += 1
 
-    print("爬取完成，结果已保存到 episodes_summary.txt")
+    print(f"爬取完成")
 
 if __name__ == "__main__":
     asyncio.run(main())
