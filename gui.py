@@ -41,6 +41,13 @@ class DramaGUI:
         self.drama_data = []
         self.image_references = []
 
+        self.drama_info = DramaInfo()
+        self.add_log("正在初始化浏览器...")
+        self.drama_info.init_browser()
+        self.add_log("浏览器初始化完成")
+
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+
         self.setup_ui()
         self.start_queue_check()
 
@@ -200,11 +207,8 @@ class DramaGUI:
 
     def search_worker(self, keyword):
         try:
-            self.log_queue.put("正在初始化浏览器...")
-
-            drama_info = DramaInfo()
-            drama_info.search(keyword)
-            data_array = drama_info.get_drama_list()
+            self.drama_info.search(keyword)
+            data_array = self.drama_info.get_drama_list()
 
             if self.stop_event.is_set():
                 self.data_queue.put({"type": "stopped"})
@@ -423,6 +427,12 @@ class DramaGUI:
     def stop_search(self):
         self.stop_event.set()
         self.add_log("正在停止...")
+
+    def _on_close(self):
+        self.stop_event.set()
+        self.add_log("正在关闭浏览器...")
+        self.drama_info.close()
+        self.root.destroy()
 
     def _reset_search_state(self):
         self.is_running = False

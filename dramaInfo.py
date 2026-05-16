@@ -38,9 +38,12 @@ class DramaInfo:
         self.wd = webdriver.Edge(options=self.options)
         self.wd.implicitly_wait(5)
 
-    def search(self, title):
+    def init_browser(self):
         self.webdriver_set()
+
+    def search(self, title):
         self.title = title
+        self.info = []
         self.wd.get('https://www.tvmao.com/')
         input_box = self.wd.find_element(By.CSS_SELECTOR, 'input#key')
 
@@ -60,8 +63,6 @@ class DramaInfo:
             episodes_num = li.find_element(By.CLASS_NAME, 'maskTx').text.strip()
             img_url = li.find_element(By.TAG_NAME, 'img').get_attribute('src')
 
-            # print(f"{i} 标题:{title}  集数:{episodes_num} href:{href}")
-
             self.info.append({
                 'id': i,
                 'title': title,
@@ -69,11 +70,13 @@ class DramaInfo:
                 'episodes_num': episodes_num,
                 'img_url': img_url
             })
-        
-        self.wd.quit()
-    
+
     def get_drama_list(self):
         return self.info
+
+    def close(self):
+        if self.wd:
+            self.wd.quit()
 
     
 
