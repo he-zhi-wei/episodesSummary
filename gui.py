@@ -3,8 +3,27 @@ from tkinter import ttk, scrolledtext, messagebox
 import threading
 import queue
 import os
-from PIL import Image, ImageTk
+import re
+import asyncio
+import aiohttp
+import aiofiles
+import random
 import time
+from bs4 import BeautifulSoup
+from PIL import Image, ImageTk
+
+from dramaInfo import DramaInfo, DataProcess, DownloadImg
+
+
+def url_process(base_url, episodes_num):
+    episode_urls = []
+    for i in range(1, episodes_num + 1):
+        prefix = (i - 1) // 3
+        url = f"{base_url}/episode/{prefix}-{i}"
+        episode_urls.append(url)
+    episode_urls[0] = episode_urls[0].replace("/0-1", "/")
+    return episode_urls
+
 
 class DramaGUI:
     def __init__(self, root):
@@ -16,6 +35,7 @@ class DramaGUI:
         self.log_queue = queue.Queue()
         self.stop_event = threading.Event()
         self.is_running = False
+        self.is_scraping = False
         self._lock = threading.Lock()
 
         self.drama_data = []
@@ -59,7 +79,7 @@ class DramaGUI:
         self.progress_label.grid(row=1, column=0, columnspan=3, sticky="w", pady=(5, 0))
 
     def setup_image_gallery(self, parent):
-        gallery_frame = ttk.LabelFrame(parent, text="剧集展示", padding=10)
+        gallery_frame = ttk.LabelFrame(parent, text="剧集展示 - 点击剧集开始爬取剧情摘要", padding=10)
         gallery_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
 
         self.canvas = tk.Canvas(gallery_frame, bg='#f5f5f5', highlightthickness=0)
@@ -120,10 +140,15 @@ class DramaGUI:
             title_text = title_text[:12] + "..."
         ttk.Label(card, text=title_text, font=('Microsoft YaHei', 9, 'bold')).pack(pady=(3, 0))
 
-        ttk.Label(card, text=drama_item['episodes_num'], foreground="gray").pack(pady=(0, 5))
+        ttk.Label(card, text=drama_item['episodes_num'], foreground="gray").pack(pady=(0, 3))
+
+        scrape_btn = ttk.Button(card, text="爬取剧情",
+                                command=lambda d=drama_item: self.start_scrape(d))
+        scrape_btn.pack(pady=(0, 5))
 
         for child in card.winfo_children():
-            child.bind("<Button-1>", lambda e, d=drama_item: self.on_drama_click(d))
+            if not isinstance(child, ttk.Button):
+                child.bind("<Button-1>", lambda e, d=drama_item: self.on_drama_click(d))
         card.bind("<Button-1>", lambda e, d=drama_item: self.on_drama_click(d))
 
         img_path = f".tmp/img_{drama_item['id']}.jpg"
@@ -180,8 +205,6 @@ class DramaGUI:
         try:
             self.log_queue.put("正在初始化浏览器...")
 
-            from dramaInfo import DramaInfo, DownloadImg
-
             drama_info = DramaInfo()
             drama_info.search(keyword)
             data_array = drama_info.get_drama_list()
@@ -199,7 +222,6 @@ class DramaGUI:
             self.log_queue.put("开始下载图片...")
             downloader = DownloadImg(data_array)
 
-            import asyncio
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
@@ -221,6 +243,127 @@ class DramaGUI:
                 "type": "error",
                 "msg": f"搜索过程中出错: {str(e)}"
             })
+
+    def start_scrape(self, drama_item):
+        if self.is_scraping:
+            messagebox.showwarning("提示", "正在爬取其他剧集中，请等待完成")
+            return
+
+        processor = DataProcess(drama_item)
+        processor.process()
+        data = processor.get_process_data()
+
+        title = data['title']
+        episodes_num = data['episodes_num']
+        base_url = data['base_url']
+
+        if episodes_num == 0:
+            messagebox.showerror("错误", f"无法解析集数: {drama_item['episodes_num']}")
+            return
+
+        ok = messagebox.askokcancel(
+            "爬取剧情摘要",
+            f"是否爬取《{title}》的剧情摘要？\n\n共 {episodes_num} 集\n输出文件: {title}_episodes_summary.txt"
+        )
+        if not ok:
+            return
+
+        self.is_scraping = True
+        self.stop_event.clear()
+        self.start_btn.config(state="disabled")
+        self.stop_btn.config(state="normal")
+
+        self.add_log(f"开始爬取《{title}》剧情摘要，共 {episodes_num} 集")
+
+        threading.Thread(
+            target=self.summary_worker,
+            args=(data,),
+            daemon=True
+        ).start()
+
+    async def _scrape_one(self, session, url, episode_num):
+        try:
+            await asyncio.sleep(random.uniform(0.2, 0.5))
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                response.raise_for_status()
+                html = await response.text()
+                soup = BeautifulSoup(html, 'html.parser')
+
+                main_left_div = soup.find('div', class_='main-left')
+                title_tag = main_left_div.find('p', class_='epi_t')
+                title = title_tag.get_text(strip=True) if title_tag else f"第{episode_num}集"
+
+                article_tag = main_left_div.find('article', class_='epi_c')
+                if article_tag:
+                    paragraphs = article_tag.find_all('p')
+                    content = '\n'.join(p.get_text(strip=True) for p in paragraphs)
+                else:
+                    content = "未找到剧情内容"
+
+                return episode_num, title, content
+        except Exception as e:
+            return episode_num, f"第{episode_num}集", f"错误: {str(e)}"
+
+    def summary_worker(self, data):
+        try:
+            title = data['title']
+            base_url = data['base_url']
+            episodes_num = data['episodes_num']
+
+            episode_urls = url_process(base_url, episodes_num)
+
+            async def run():
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
+                async with aiohttp.ClientSession(headers=headers) as session:
+                    tasks = [self._scrape_one(session, url, i + 1)
+                             for i, url in enumerate(episode_urls)]
+
+                    results = {}
+                    filename = f'{self._sanitize_filename(title)}_episodes_summary.txt'
+                    async with aiofiles.open(filename, 'w', encoding='utf-8') as file:
+                        current = 1
+                        completed = 0
+                        for coro in asyncio.as_completed(tasks):
+                            ep_num, ep_title, content = await coro
+                            results[ep_num] = (ep_title, content)
+
+                            while current in results:
+                                t, c = results[current]
+                                await file.write(f"{t}:\n{c}\n\n")
+                                del results[current]
+                                current += 1
+
+                            if self.stop_event.is_set():
+                                self.data_queue.put({"type": "summary_stopped"})
+                                return
+
+                            completed += 1
+                            self.log_queue.put(f"爬取进度: {completed}/{episodes_num}")
+
+                    self.data_queue.put({
+                        "type": "summary_complete",
+                        "title": title,
+                        "total": episodes_num,
+                        "filename": filename
+                    })
+
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(run())
+            finally:
+                loop.close()
+
+        except Exception as e:
+            self.data_queue.put({
+                "type": "summary_error",
+                "msg": f"爬取剧情时出错: {str(e)}"
+            })
+
+    def _sanitize_filename(self, name):
+        return re.sub(r'[\\/:*?"<>|]', '_', name)
 
     def update_image_gallery(self):
         for widget in self.inner_frame.winfo_children():
@@ -245,8 +388,7 @@ class DramaGUI:
             "剧集详情",
             f"标题: {drama_data['title']}\n"
             f"集数: {drama_data['episodes_num']}\n"
-            f"链接: {drama_data['href']}\n"
-            f"图片URL: {drama_data['img_url']}"
+            f"链接: {drama_data['href']}"
         )
 
     def add_log(self, message):
@@ -259,10 +401,15 @@ class DramaGUI:
 
     def stop_search(self):
         self.stop_event.set()
-        self.add_log("正在停止搜索...")
+        self.add_log("正在停止...")
 
     def _reset_search_state(self):
         self.is_running = False
+        self.start_btn.config(state="normal")
+        self.stop_btn.config(state="disabled")
+
+    def _reset_scrape_state(self):
+        self.is_scraping = False
         self.start_btn.config(state="normal")
         self.stop_btn.config(state="disabled")
 
@@ -298,6 +445,28 @@ class DramaGUI:
                     self.add_log("搜索被用户停止")
                     self._reset_search_state()
 
+                elif msg_type == "summary_complete":
+                    self.progress_label.config(
+                        text=f"《{msg['title']}》爬取完成，共 {msg['total']} 集", foreground="green"
+                    )
+                    self.add_log(f"剧情摘要已保存至: {msg['filename']}")
+                    messagebox.showinfo(
+                        "爬取完成",
+                        f"《{msg['title']}》剧情摘要已保存\n共 {msg['total']} 集\n文件: {msg['filename']}"
+                    )
+                    self._reset_scrape_state()
+
+                elif msg_type == "summary_error":
+                    self.progress_label.config(text="爬取出错", foreground="red")
+                    self.add_log(f"错误: {msg['msg']}")
+                    messagebox.showerror("错误", msg["msg"])
+                    self._reset_scrape_state()
+
+                elif msg_type == "summary_stopped":
+                    self.progress_label.config(text="爬取已停止", foreground="gray")
+                    self.add_log("爬取被用户停止")
+                    self._reset_scrape_state()
+
         except queue.Empty:
             pass
 
@@ -309,7 +478,7 @@ class DramaGUI:
         except queue.Empty:
             pass
 
-        if self.is_running:
+        if self.is_running or self.is_scraping:
             self.root.after(100, self.process_queue_messages)
 
     def start_queue_check(self):
@@ -318,7 +487,7 @@ class DramaGUI:
 
 def main():
     root = tk.Tk()
-    app = DramaGUI(root)
+    DramaGUI(root)
     root.mainloop()
 
 if __name__ == "__main__":
