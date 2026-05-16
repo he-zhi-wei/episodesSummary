@@ -79,7 +79,7 @@ class DramaGUI:
         self.progress_label.grid(row=1, column=0, columnspan=3, sticky="w", pady=(5, 0))
 
     def setup_image_gallery(self, parent):
-        gallery_frame = ttk.LabelFrame(parent, text="剧集展示 - 点击剧集开始爬取剧情摘要", padding=10)
+        gallery_frame = ttk.LabelFrame(parent, text="搜索结果 - 点击剧集卡片爬取剧情摘要", padding=10)
         gallery_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
 
         self.canvas = tk.Canvas(gallery_frame, bg='#f5f5f5', highlightthickness=0)
@@ -140,16 +140,11 @@ class DramaGUI:
             title_text = title_text[:12] + "..."
         ttk.Label(card, text=title_text, font=('Microsoft YaHei', 9, 'bold')).pack(pady=(3, 0))
 
-        ttk.Label(card, text=drama_item['episodes_num'], foreground="gray").pack(pady=(0, 3))
-
-        scrape_btn = ttk.Button(card, text="爬取剧情",
-                                command=lambda d=drama_item: self.start_scrape(d))
-        scrape_btn.pack(pady=(0, 5))
+        ttk.Label(card, text=drama_item['episodes_num'], foreground="gray").pack(pady=(0, 5))
 
         for child in card.winfo_children():
-            if not isinstance(child, ttk.Button):
-                child.bind("<Button-1>", lambda e, d=drama_item: self.on_drama_click(d))
-        card.bind("<Button-1>", lambda e, d=drama_item: self.on_drama_click(d))
+            child.bind("<Button-1>", lambda e, d=drama_item: self.start_scrape(d))
+        card.bind("<Button-1>", lambda e, d=drama_item: self.start_scrape(d))
 
         img_path = f".tmp/img_{drama_item['id']}.jpg"
         self.root.after(50, lambda: self.load_image_async(img_label, img_path, drama_item))
@@ -246,7 +241,6 @@ class DramaGUI:
 
     def start_scrape(self, drama_item):
         if self.is_scraping or self.is_running:
-            messagebox.showwarning("提示", "正在执行其他操作，请等待完成")
             return
 
         processor = DataProcess(drama_item)
@@ -261,19 +255,13 @@ class DramaGUI:
             messagebox.showerror("错误", f"无法解析集数: {drama_item['episodes_num']}")
             return
 
-        ok = messagebox.askokcancel(
-            "爬取剧情摘要",
-            f"是否爬取《{title}》的剧情摘要？\n\n共 {episodes_num} 集\n输出文件: {title}_episodes_summary.txt"
-        )
-        if not ok:
-            return
-
         self.is_scraping = True
         self.stop_event.clear()
         self.start_btn.config(state="disabled")
         self.stop_btn.config(state="normal")
 
         self.add_log(f"开始爬取《{title}》剧情摘要，共 {episodes_num} 集")
+        self.progress_label.config(text=f"正在爬取《{title}》...", foreground="blue")
 
         threading.Thread(
             target=self.summary_worker,
@@ -305,6 +293,7 @@ class DramaGUI:
             return episode_num, f"第{episode_num}集", f"错误: {str(e)}"
 
     def summary_worker(self, data):
+        collected = {}
         try:
             title = data['title']
             base_url = data['base_url']
@@ -332,6 +321,7 @@ class DramaGUI:
                             while current in results:
                                 t, c = results[current]
                                 await file.write(f"{t}:\n{c}\n\n")
+                                collected[current] = (t, c)
                                 del results[current]
                                 current += 1
 
@@ -346,7 +336,8 @@ class DramaGUI:
                         "type": "summary_complete",
                         "title": title,
                         "total": episodes_num,
-                        "filename": filename
+                        "filename": filename,
+                        "episodes": collected
                     })
 
             loop = asyncio.new_event_loop()
@@ -365,6 +356,32 @@ class DramaGUI:
     def _sanitize_filename(self, name):
         return re.sub(r'[\\/:*?"<>|]', '_', name)
 
+    def show_episode_window(self, title, total, filename, episodes):
+        win = tk.Toplevel(self.root)
+        win.title(f"《{title}》剧情摘要 - 共 {total} 集")
+        win.geometry("900x700")
+
+        top_bar = ttk.Frame(win)
+        top_bar.pack(fill=tk.X, padx=10, pady=(10, 5))
+        ttk.Label(top_bar, text=f"《{title}》共 {total} 集",
+                  font=('Microsoft YaHei', 12, 'bold')).pack(side=tk.LEFT)
+        ttk.Label(top_bar, text=f"已保存至: {filename}", foreground="gray").pack(side=tk.RIGHT)
+
+        text_area = scrolledtext.ScrolledText(win, wrap=tk.WORD, font=('Microsoft YaHei', 10))
+        text_area.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+
+        for ep_num in sorted(episodes.keys()):
+            ep_title, content = episodes[ep_num]
+            text_area.insert(tk.END, f"{ep_title}\n", "title")
+            text_area.insert(tk.END, f"{content}\n\n", "body")
+
+        text_area.tag_configure("title", font=('Microsoft YaHei', 11, 'bold'), foreground="#1a5276")
+        text_area.tag_configure("body", font=('Microsoft YaHei', 10))
+        text_area.config(state=tk.DISABLED)
+
+        close_btn = ttk.Button(win, text="关闭", command=win.destroy)
+        close_btn.pack(pady=(0, 10))
+
     def update_image_gallery(self):
         for widget in self.inner_frame.winfo_children():
             widget.destroy()
@@ -382,14 +399,6 @@ class DramaGUI:
             self.inner_frame.grid_columnconfigure(c, weight=1)
 
         self.root.after(100, lambda: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
-
-    def on_drama_click(self, drama_data):
-        messagebox.showinfo(
-            "剧集详情",
-            f"标题: {drama_data['title']}\n"
-            f"集数: {drama_data['episodes_num']}\n"
-            f"链接: {drama_data['href']}"
-        )
 
     def add_log(self, message):
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -450,9 +459,8 @@ class DramaGUI:
                         text=f"《{msg['title']}》爬取完成，共 {msg['total']} 集", foreground="green"
                     )
                     self.add_log(f"剧情摘要已保存至: {msg['filename']}")
-                    messagebox.showinfo(
-                        "爬取完成",
-                        f"《{msg['title']}》剧情摘要已保存\n共 {msg['total']} 集\n文件: {msg['filename']}"
+                    self.show_episode_window(
+                        msg['title'], msg['total'], msg['filename'], msg['episodes']
                     )
                     self._reset_scrape_state()
 
