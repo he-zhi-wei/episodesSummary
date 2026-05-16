@@ -3,7 +3,7 @@ import aiohttp
 import aiofiles
 import random
 from bs4 import BeautifulSoup
-from find_href import data_process
+from dramaInfo import DramaInfo, DataProcess
 
 
 def url_process(base_url, episodes_num):
