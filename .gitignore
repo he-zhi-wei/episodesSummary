@@ -20,3 +20,6 @@ wheels/
 
 # html files
 *.html
+
+# temp files
+.tmp/
