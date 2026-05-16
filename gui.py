@@ -41,15 +41,15 @@ class DramaGUI:
         self.drama_data = []
         self.image_references = []
 
-        self.drama_info = DramaInfo()
-        self.add_log("正在初始化浏览器...")
-        self.drama_info.init_browser()
-        self.add_log("浏览器初始化完成")
-
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self.setup_ui()
         self.start_queue_check()
+
+        self.drama_info = DramaInfo()
+        self.add_log("正在初始化浏览器...")
+        self.drama_info.init_browser()
+        self.add_log("浏览器初始化完成")
 
     def setup_ui(self):
         main_frame = ttk.Frame(self.root)
