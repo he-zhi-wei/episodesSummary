@@ -85,11 +85,12 @@ class DataProcess:
         self.process_data = None
 
     def process(self):
-        title = self.data['title'][:-4]
-        numbers = re.findall(r'\d+', self.data['episodes_num'])[0]
+        title = self.data['title']
+        numbers = re.findall(r'\d+', self.data['episodes_num'])
+        episodes_num = int(numbers[0]) if numbers else 0
         self.process_data = {
             'title': title,
-            'episodes_num': int(numbers),
+            'episodes_num': episodes_num,
             'base_url': self.data['href'],
             'img_url': self.data['img_url']
         }

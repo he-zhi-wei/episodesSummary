@@ -50,11 +50,30 @@ async def scrape_episode_summary(session, url, episode_num):
         return episode_num, f"第{episode_num}集", f"错误: {str(e)}"
 
 async def main():
-    print("--- 剧集链接获取 ---")
-    data = data_process()
+    keyword = input("请输入剧集名称: ").strip()
+
+    print("--- 搜索剧集 ---")
+    drama_info = DramaInfo()
+    drama_info.search(keyword)
+    data_array = drama_info.get_drama_list()
+
+    if not data_array:
+        print("未找到相关剧集")
+        return
+
+    for i, item in enumerate(data_array):
+        print(f"{i}: {item['title']} ({item['episodes_num']})")
+
+    choice = int(input(f"请选择剧集 (0-{len(data_array)-1}): ").strip())
+    selected = data_array[choice]
+
+    processor = DataProcess(selected)
+    processor.process()
+    data = processor.get_process_data()
+
     title = data['title']
     base_url = data['base_url']
-    episodes_num = data['episodes_num'] 
+    episodes_num = data['episodes_num']
 
     print(f"开始爬取《{title}》的剧情摘要，共{episodes_num}集")
 
