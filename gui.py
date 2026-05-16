@@ -486,8 +486,7 @@ class DramaGUI:
         except queue.Empty:
             pass
 
-        if self.is_running or self.is_scraping:
-            self.root.after(100, self.process_queue_messages)
+        self.root.after(100, self.process_queue_messages)
 
     def start_queue_check(self):
         self.process_queue_messages()
