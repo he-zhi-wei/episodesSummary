@@ -179,7 +179,7 @@ class DramaGUI:
             messagebox.showwarning("警告", "请输入搜索关键词")
             return
 
-        if self.is_running:
+        if self.is_running or self.is_scraping:
             return
 
         self.is_running = True
@@ -245,8 +245,8 @@ class DramaGUI:
             })
 
     def start_scrape(self, drama_item):
-        if self.is_scraping:
-            messagebox.showwarning("提示", "正在爬取其他剧集中，请等待完成")
+        if self.is_scraping or self.is_running:
+            messagebox.showwarning("提示", "正在执行其他操作，请等待完成")
             return
 
         processor = DataProcess(drama_item)
