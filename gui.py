@@ -182,6 +182,8 @@ class DramaGUI:
         self.start_btn.config(state="disabled")
         self.stop_btn.config(state="normal")
 
+        self._clear_tmp_images()
+
         for widget in self.inner_frame.winfo_children():
             widget.destroy()
         self.drama_data = []
@@ -352,6 +354,16 @@ class DramaGUI:
                 "type": "summary_error",
                 "msg": f"爬取剧情时出错: {str(e)}"
             })
+
+    def _clear_tmp_images(self):
+        tmp_dir = ".tmp"
+        if os.path.isdir(tmp_dir):
+            for f in os.listdir(tmp_dir):
+                if f.endswith(".jpg"):
+                    try:
+                        os.remove(os.path.join(tmp_dir, f))
+                    except OSError:
+                        pass
 
     def _sanitize_filename(self, name):
         return re.sub(r'[\\/:*?"<>|]', '_', name)
